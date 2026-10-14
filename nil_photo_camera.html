@@ -1,0 +1,42 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Nil 测地线相机 · 绘画与照片</title><style>
+*{box-sizing:border-box}body{margin:0;background:#edf1f5;color:#243342;font:15px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}header{background:white;padding:19px max(16px,calc((100vw - 1180px)/2));border-bottom:1px solid #dbe1e7}h1{font-size:23px;margin:0 0 6px}p{margin:5px 0}main{max-width:1180px;margin:auto;padding:16px}.controls,.panel,.note{background:white;border-radius:12px;padding:16px}.controls{display:flex;flex-wrap:wrap;gap:16px;align-items:center}.control{display:flex;gap:8px;align-items:center}input[type=range]{width:130px}button,.file{border:0;border-radius:8px;background:#216b91;color:white;padding:11px 14px;cursor:pointer;font:inherit}.file input{display:none}.views{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}.panel{min-width:0}.panel h2{font-size:16px;margin:0 0 12px}.panel canvas{display:block;width:100%;height:auto;background:#e1e7eb;border-radius:5px}.note{margin-top:14px;line-height:1.7;color:#455766}.muted{color:#657784;font-size:13px}#status{font-size:13px;color:#526f80}@media(max-width:720px){.views{grid-template-columns:1fr}.controls{gap:12px}}
+</style></head><body><header><h1>Nil 测地线相机</h1><p class="muted">画布不动，改变视线传播路径：普通相机 vs Nil 黎曼测地线相机</p></header><main>
+<div class="controls"><label class="file">导入照片 / 绘画<input type="file" id="upload" accept="image/*"></label><label class="control">λ <input type="range" id="lambda" min="0" max="2" step="0.05" value="0.6"><b id="lambdaVal">0.60</b></label><label class="control">相机距离 <input type="range" id="distance" min="0.7" max="2.2" step="0.1" value="1.2"><b id="distanceVal">1.2</b></label><label class="control"><input type="checkbox" id="grid">参考网格</label><button id="save">导出 Nil 图像 PNG</button><span id="status">准备中…</span></div>
+<div class="views"><div class="panel"><h2>原图 · 欧氏直线视线</h2><canvas id="original" width="480" height="360"></canvas></div><div class="panel"><h2>Nil 视觉 · 测地线视线</h2><canvas id="nil" width="480" height="360"></canvas></div></div>
+<div class="note"><strong>几何定义：</strong>ds² = dx² + dy² + (dz − λxdy)²。相机在原点，静止画布位于 x = D。每个像素对应一条从相机发出的测地线，取其与画布 x = D 的首次正向交点采样。λ = 0 时两图一致。灰色区域表示未击中画布。<br><strong>注意：</strong>这是在指定 Nil 黎曼度量下将视线假定为测地线的数学视觉实验，不是从 dz = λxdy 单独推导出的真实物理光学定律。图片在浏览器本地读取，不上传服务器。</div>
+</main><script>
+'use strict';
+const $=id=>document.getElementById(id), W=480,H=360;
+const left=$('original').getContext('2d',{willReadFrequently:true}),right=$('nil').getContext('2d');
+let img=null,delay=0;
+function paint(){left.fillStyle='#f9f5ec';left.fillRect(0,0,W,H);if(img){let s=Math.min(W/img.width,H/img.height),w=img.width*s,h=img.height*s;left.drawImage(img,(W-w)/2,(H-h)/2,w,h)}else{left.fillStyle='#45627b';left.textAlign='center';left.font='bold 43px Georgia,serif';left.fillText('NIL SPACE',W/2,160);left.font='17px sans-serif';left.fillText('导入一幅照片或绘画',W/2,205)}if($('grid').checked){left.strokeStyle='rgba(24,111,163,.35)';left.lineWidth=1;for(let x=0;x<W;x+=40){left.beginPath();left.moveTo(x,0);left.lineTo(x,H);left.stroke()}for(let y=0;y<H;y+=40){left.beginPath();left.moveTo(0,y);left.lineTo(W,y);left.stroke()}}}
+// Nil Riemannian geodesics in orthonormal frame:
+// a=x', b=y', c=z'-lambda*x*y'; a'=-lambda*c*b, b'=lambda*c*a, c'=0.
+// For initial velocity (1,u,v), omega=lambda*v.
+function xy(t,u,w){if(Math.abs(w)<1e-9)return [t,u*t];let s=Math.sin(w*t),c=Math.cos(w*t);return [(s+u*(c-1))/w,((1-c)+u*s)/w]}
+function intersection(u,v,L,D){let w=L*v;if(Math.abs(w)<1e-9)return [u*D,v*D];
+// Scan for first forward intersection with x=D.
+let t0=0,x0=0,lo=0,hi=0,hit=false,limit=Math.max(4,3*D);
+for(let t=.06;t<=limit;t+=.06){let x=xy(t,u,w)[0];if(x>=D&&x0<D){lo=t0;hi=t;hit=true;break}t0=t;x0=x}
+if(!hit)return null;
+for(let j=0;j<15;j++){let m=(lo+hi)/2;if(xy(m,u,w)[0]>=D)hi=m;else lo=m}
+let t=(lo+hi)/2,Y=xy(t,u,w)[1];
+// Simpson quadrature for z(t)=v*t + lambda*integral(x(t)*y'(t))dt.
+let N=12,h=t/N,acc=0;
+for(let j=0;j<=N;j++){let q=j*h,X=xy(q,u,w)[0],ydot=Math.sin(w*q)+u*Math.cos(w*q);acc+=(j===0||j===N?1:j%2?4:2)*X*ydot}
+return [Y,v*t+L*acc*h/3]}
+function render(){const L=+$('lambda').value,D=+$('distance').value;$('lambdaVal').textContent=L.toFixed(2);$('distanceVal').textContent=D.toFixed(1);paint();let src=left.getImageData(0,0,W,H).data,dst=right.createImageData(W,H),out=dst.data;
+// Physical canvas width and height: 1.2 x 0.9, camera rays chosen to match at lambda=0.
+let pw=1.2,ph=pw*H/W,miss=0;
+for(let j=0;j<H;j++){let v=(.5-(j+.5)/H)*ph/D;for(let i=0;i<W;i++){
+let u=((i+.5)/W-.5)*pw/D;
+let p=L===0?[u*D,v*D]:intersection(u,v,L,D);
+let k=4*(j*W+i),ix=p?Math.floor((p[0]/pw+.5)*W):-1,iy=p?Math.floor((.5-p[1]/ph)*H):-1;
+if(ix<0||ix>=W||iy<0||iy>=H){out[k]=221;out[k+1]=227;out[k+2]=234;miss++}else{let m=4*(iy*W+ix);out[k]=src[m];out[k+1]=src[m+1];out[k+2]=src[m+2]}out[k+3]=255}}
+right.putImageData(dst,0,0);$('status').textContent='已完成 · 未命中 '+(miss*100/(W*H)).toFixed(1)+'%'}
+function schedule(){clearTimeout(delay);$('status').textContent='正在计算…';delay=setTimeout(render,50)}
+['lambda','distance','grid'].forEach(id=>$(id).addEventListener('input',schedule));
+$('upload').addEventListener('change',e=>{let f=e.target.files[0];if(!f)return;let url=URL.createObjectURL(f),im=new Image();im.onload=()=>{img=im;URL.revokeObjectURL(url);schedule()};im.onerror=()=>{$('status').textContent='无法读取图片';URL.revokeObjectURL(url)};im.src=url});
+$('save').addEventListener('click',()=>right.canvas.toBlob(blob=>{if(!blob)return;let url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='nil_geodesic_camera.png';a.click();setTimeout(()=>URL.revokeObjectURL(url),3000)},'image/png'));
+schedule();
+</script></body></html>
